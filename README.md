@@ -13,7 +13,7 @@ Many small teams run their application database on a virtual machine they manage
 
 This lab addresses both. The database moves to Azure SQL Database, a managed service where Microsoft runs the server. The password moves into Azure Key Vault, and the web server gets its own identity with read-only access to it.
 
-**Scope of this lab:** it covers the infrastructure and access setup. No application data was migrated. I tested that the web server can read the secret and can reach the database over the network, not that it logs in to the database with the password. That is listed under next steps.
+**Scope of this lab:** it covers the infrastructure and access setup. No application data was migrated. I tested that the web server can read the secret and can open a network connection to the SQL server. I did not test the web server logging in to the database with the password. That is listed under next steps.
 
 ## How This Lab Solves It
 
@@ -23,7 +23,7 @@ This lab addresses both. The database moves to Azure SQL Database, a managed ser
 | The database password sits in files people and servers can read | Stored the password as a Key Vault secret named `SqlAdminPassword`, in a vault that uses Azure role-based access control | [Secret](screenshots/06-key-vault-secret.png) shows as Enabled, with the value hidden |
 | The web server needs the password, but giving it a stored credential recreates the problem | Turned on a system-assigned managed identity for `vm-web-01`, so Azure issues it short-lived tokens | [Identity page](screenshots/07-vm-managed-identity-on.png) shows Status On. Test 1 returned a token (length 1894), shown in the video |
 | The web server should only have the access it needs | Assigned the VM's identity the Key Vault Secrets User role on that one vault | [Role assignment](screenshots/08-vm-key-vault-secrets-user-role.png). [Test 2](screenshots/10-test2-read-secret-200.png) (read) returned 200. [Test 3](screenshots/11-test3-write-blocked-403.png) (write) returned 403 |
-| The web server has to be able to reach the new database | Checked the network path from `vm-web-01` to the SQL server on port 1433 | [Test 4](screenshots/12-test4-sql-port-1433-reachable.png) returned "Port 1433 reachable" |
+| The web server has to be able to reach the new database | Checked the network path from `vm-web-01` to the SQL server on port 1433 | [Test 4](screenshots/12-test4-sql-port-1433-reachable.png) returned "Port 1433 reachable". A database login was not tested |
 
 ## Architecture
 
@@ -144,14 +144,14 @@ timeout 5 bash -c "</dev/tcp/$SQLSERVER.database.windows.net/1433" && echo "Port
 
 ![Terminal on vm-web-01 showing Port 1433 reachable for sql-server-timothy](screenshots/12-test4-sql-port-1433-reachable.png)
 
-The port is reachable, so the network path from the web server to the database is open. This test does not log in to the database.
+The port is reachable, so the web server can open a network connection to the SQL server. This test does not log in to the database, so it does not show whether the server's firewall rules accept the web server or whether the password works. Azure SQL reports a blocked address as an error at login.
 
 | Test | Result | What it means |
 |---|---|---|
 | 1. Get a token | Token length: 1894 | Azure issued the VM a token, so the managed identity works |
 | 2. Read `SqlAdminPassword` | 200 | Success. The VM read the secret using only its identity |
 | 3. Create a new secret | 403 | Denied. The VM is read-only, which is what the role is supposed to allow |
-| 4. Reach the SQL server on port 1433 | Port 1433 reachable | The network path to the database is open. A database login was not tested |
+| 4. Reach the SQL server on port 1433 | Port 1433 reachable | The web server can open a connection to the SQL server. A database login was not tested, so the firewall rules and the password are unconfirmed |
 
 No password was typed or stored on the web server for any of these tests.
 
