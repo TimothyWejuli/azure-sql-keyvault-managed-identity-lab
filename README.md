@@ -1,8 +1,10 @@
-# Azure SQL Database with Key Vault and Managed Identity
+# Modernize to SQL PaaS
+
+**Azure SQL Database with Key Vault and Managed Identity**
 
 Replacing a self-managed database server with a managed database, and giving a web server access to the database password without storing that password on the server.
 
-**Video walkthrough (5 min):** [Azure Two-Tier App VM and SQL with Key Vault](https://www.loom.com/share/b808c626ccc44ec2b4497085ea4515ab)
+**Video walkthrough (5 min):** [Modernize to SQL PaaS on Loom](https://www.loom.com/share/b808c626ccc44ec2b4497085ea4515ab)
 
 ## The Business Problem This Lab Solves
 
