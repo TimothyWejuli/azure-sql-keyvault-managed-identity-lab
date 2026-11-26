@@ -19,11 +19,11 @@ This lab addresses both. The database moves to Azure SQL Database, a managed ser
 
 | Business challenge | Solution in this lab | Proof |
 |---|---|---|
-| The team patches and backs up its own database server | Removed the database VM from the earlier lab and created an Azure SQL Database (`sqldb-app`) on a logical server (`sql-server-timothy`) | [Old resource group](screenshots/02-lab02-database-vm-removed.png) lists 7 resources and no database VM. [New resource group](screenshots/03-lab03-resource-group.png) lists the SQL server, database, and Key Vault |
-| The database password sits in files people and servers can read | Stored the password as a Key Vault secret named `SqlAdminPassword`, in a vault that uses Azure role-based access control | [Secret](screenshots/05-key-vault-secret.png) shows as Enabled, with the value hidden |
-| The web server needs the password, but giving it a stored credential recreates the problem | Turned on a system-assigned managed identity for `vm-web-01`, so Azure issues it short-lived tokens | [Identity page](screenshots/06-vm-managed-identity-on.png) shows Status On. Test 1 returned a token (length 1894), shown in the video |
-| The web server should only have the access it needs | Assigned the VM's identity the Key Vault Secrets User role on that one vault | [Role assignment](screenshots/07-vm-key-vault-secrets-user-role.png). [Test 2](screenshots/09-test2-read-secret-200.png) (read) returned 200. [Test 3](screenshots/10-test3-write-blocked-403.png) (write) returned 403 |
-| The web server has to be able to reach the new database | Checked the network path from `vm-web-01` to the SQL server on port 1433 | [Test 4](screenshots/11-test4-sql-port-1433-reachable.png) returned "Port 1433 reachable" |
+| The team patches and backs up its own database server | Removed the database VM from the earlier lab and created an Azure SQL Database (`sqldb-app`) on a logical server (`sql-server-timothy`) | [Old resource group](screenshots/02-lab02-database-vm-removed.png) lists 7 resources and no database VM. [New resource group](screenshots/03-lab03-resource-group.png) lists the SQL server, database, and Key Vault. [SQL databases list](screenshots/04-sql-database-list.png) shows `sqldb-app` on `sql-server-timothy` |
+| The database password sits in files people and servers can read | Stored the password as a Key Vault secret named `SqlAdminPassword`, in a vault that uses Azure role-based access control | [Secret](screenshots/06-key-vault-secret.png) shows as Enabled, with the value hidden |
+| The web server needs the password, but giving it a stored credential recreates the problem | Turned on a system-assigned managed identity for `vm-web-01`, so Azure issues it short-lived tokens | [Identity page](screenshots/07-vm-managed-identity-on.png) shows Status On. Test 1 returned a token (length 1894), shown in the video |
+| The web server should only have the access it needs | Assigned the VM's identity the Key Vault Secrets User role on that one vault | [Role assignment](screenshots/08-vm-key-vault-secrets-user-role.png). [Test 2](screenshots/10-test2-read-secret-200.png) (read) returned 200. [Test 3](screenshots/11-test3-write-blocked-403.png) (write) returned 403 |
+| The web server has to be able to reach the new database | Checked the network path from `vm-web-01` to the SQL server on port 1433 | [Test 4](screenshots/12-test4-sql-port-1433-reachable.png) returned "Port 1433 reachable" |
 
 ## Architecture
 
@@ -50,7 +50,7 @@ Everything was built in the Azure portal.
 
 I deleted the database VM from the earlier lab along with its disk and network interface. Stopping the VM would not have been enough, because a stopped VM is still charged for its disk. The web server, `vm-web-01`, stayed.
 
-![rg-lab02-Timothy resource list with 7 resources](screenshots/02-lab02-database-vm-removed.png)
+![rg-lab02-Timothy resource list with 7 resources and no database VM](screenshots/02-lab02-database-vm-removed.png)
 
 The resource group now holds 7 resources, all belonging to the web server and its network: the VM, its SSH key, public IP, network security group, network interface, disk, and the virtual network. Nothing from the database server is left.
 
@@ -64,11 +64,15 @@ For this lab the server uses a public endpoint protected by its firewall.
 
 The new resource group holds 3 resources: the Key Vault, the SQL server, and the `sqldb-app` database.
 
+![Azure SQL databases list showing sqldb-app on the server sql-server-timothy](screenshots/04-sql-database-list.png)
+
+The SQL databases list confirms the database `sqldb-app` sits on the server `sql-server-timothy`.
+
 ### 3. Create the Key Vault and give myself access
 
 I created the vault with the Azure role-based access control permission model. With that model, creating a vault does not let you work with the secrets inside it. My account already had the Owner role on the subscription, but Owner manages resources and does not include reading or writing secrets. I assigned my account the Key Vault Administrator role on the vault before I could add a secret.
 
-![Role assignments for my account on kv-lab03-timothy: Key Vault Administrator on this resource, Owner inherited from the subscription](screenshots/04-key-vault-administrator-role.png)
+![Role assignments for my account on kv-lab03-timothy: Key Vault Administrator on this resource, Owner inherited from the subscription](screenshots/05-key-vault-administrator-role.png)
 
 The screenshot shows both roles on my account: Key Vault Administrator scoped to this vault, and Owner inherited from the subscription.
 
@@ -76,7 +80,7 @@ The screenshot shows both roles on my account: Key Vault Administrator scoped to
 
 I added the SQL admin password to the vault as a secret named `SqlAdminPassword`.
 
-![Key Vault secrets list showing SqlAdminPassword with status Enabled](screenshots/05-key-vault-secret.png)
+![Key Vault secrets list showing SqlAdminPassword with status Enabled](screenshots/06-key-vault-secret.png)
 
 The secret is Enabled. The portal lists the name and status only, and the value stays hidden.
 
@@ -84,7 +88,7 @@ The secret is Enabled. The portal lists the name and status only, and the value 
 
 On `vm-web-01`, I turned on the system-assigned managed identity. This registers the VM in Microsoft Entra ID so it can prove who it is to other Azure services. Azure manages the credential behind it, so there is nothing for me to store or rotate. The identity is tied to the VM and is removed if the VM is deleted.
 
-![vm-web-01 Identity page with system-assigned status set to On](screenshots/06-vm-managed-identity-on.png)
+![System assigned managed identity tab with Status set to On and an Object (principal) ID](screenshots/07-vm-managed-identity-on.png)
 
 Status is On, and the VM now has its own Object (principal) ID.
 
@@ -92,7 +96,7 @@ Status is On, and the VM now has its own Object (principal) ID.
 
 An identity has no access until it is given a role. On the Key Vault, I assigned the VM's identity the Key Vault Secrets User role. That role can read secret values. It cannot create, change, or delete them.
 
-![Azure role assignments for vm-web-01: Key Vault Secrets User on kv-lab03-timothy](screenshots/07-vm-key-vault-secrets-user-role.png)
+![Azure role assignments opened from the vm-web-01 Identity page: Key Vault Secrets User on kv-lab03-timothy](screenshots/08-vm-key-vault-secrets-user-role.png)
 
 The VM's only role assignment is Key Vault Secrets User, and it applies to this one vault.
 
@@ -106,7 +110,7 @@ I connected to `vm-web-01` over SSH and ran four tests. The token and secret req
 TOKEN=$(curl -s 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net' -H Metadata:true | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4); echo "Token length: ${#TOKEN}"
 ```
 
-![Terminal on vm-web-01 showing the Test 1 token command](screenshots/08-test1-identity-token-command.png)
+![Terminal on vm-web-01 showing the Test 1 token command](screenshots/09-test1-identity-token-command.png)
 
 This screenshot shows the command. The result, `Token length: 1894`, is on screen in the [video walkthrough at 3:35](https://www.loom.com/share/b808c626ccc44ec2b4497085ea4515ab?t=215). A length of 0 would have meant the identity was off.
 
@@ -117,7 +121,7 @@ read -p "Key Vault name: " VAULT
 curl -s -o /dev/null -w "%{http_code}\n" "https://$VAULT.vault.azure.net/secrets/SqlAdminPassword?api-version=2016-10-01" -H "Authorization: Bearer $TOKEN"
 ```
 
-![Terminal on vm-web-01 showing the secret read request returning 200](screenshots/09-test2-read-secret-200.png)
+![Terminal on vm-web-01 showing the secret read request returning 200](screenshots/10-test2-read-secret-200.png)
 
 The request returned 200, which means success. The VM read the secret using only its identity.
 
@@ -127,7 +131,7 @@ The request returned 200, which means success. The VM read the secret using only
 curl -s -o /dev/null -w "%{http_code}\n" -X PUT "https://$VAULT.vault.azure.net/secrets/TestWrite?api-version=2016-10-01" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"value":"test"}'
 ```
 
-![Terminal on vm-web-01 showing the secret write request returning 403](screenshots/10-test3-write-blocked-403.png)
+![Terminal on vm-web-01 showing the secret write request returning 403](screenshots/11-test3-write-blocked-403.png)
 
 The request returned 403, which means denied. The VM can read secrets but cannot create them.
 
@@ -138,7 +142,7 @@ read -p "SQL server name: " SQLSERVER
 timeout 5 bash -c "</dev/tcp/$SQLSERVER.database.windows.net/1433" && echo "Port 1433 reachable" || echo "Port 1433 not reachable"
 ```
 
-![Terminal on vm-web-01 showing Port 1433 reachable for sql-server-timothy](screenshots/11-test4-sql-port-1433-reachable.png)
+![Terminal on vm-web-01 showing Port 1433 reachable for sql-server-timothy](screenshots/12-test4-sql-port-1433-reachable.png)
 
 The port is reachable, so the network path from the web server to the database is open. This test does not log in to the database.
 
