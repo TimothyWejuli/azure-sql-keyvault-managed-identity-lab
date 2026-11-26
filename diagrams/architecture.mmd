@@ -1,0 +1,12 @@
+flowchart LR
+    subgraph RG2["rg-lab02-Timothy - East US"]
+        VM["vm-web-01<br/>Ubuntu 24.04 web server<br/>system-assigned managed identity"]
+    end
+    ENTRA["Microsoft Entra ID"]
+    subgraph RG3["rg-lab03-Timothy - Central US"]
+        KV["kv-lab03-timothy<br/>Key Vault<br/>secret: SqlAdminPassword"]
+        DB[("sqldb-app<br/>Azure SQL Database<br/>on sql-server-timothy")]
+    end
+    VM -->|"1. gets a token for its identity"| ENTRA
+    VM -->|"2. reads the secret with a read-only role"| KV
+    VM -->|"3. reaches the database on port 1433"| DB

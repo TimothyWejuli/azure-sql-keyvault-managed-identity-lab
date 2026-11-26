@@ -13,7 +13,7 @@ Many small teams run their application database on a virtual machine they manage
 
 This lab addresses both. The database moves to Azure SQL Database, a managed service where Microsoft runs the server. The password moves into Azure Key Vault, and the web server gets its own identity with read-only access to it.
 
-**Scope of this lab:** it covers the infrastructure and access setup. No application data was migrated, and I tested that the web server can read the secret, not that it logs in to the database with it. That is listed under next steps.
+**Scope of this lab:** it covers the infrastructure and access setup. No application data was migrated. I tested that the web server can read the secret and can reach the database over the network, not that it logs in to the database with the password. That is listed under next steps.
 
 ## How This Lab Solves It
 
@@ -21,31 +21,19 @@ This lab addresses both. The database moves to Azure SQL Database, a managed ser
 |---|---|---|
 | The team patches and backs up its own database server | Removed the database VM from the earlier lab and created an Azure SQL Database (`sqldb-app`) on a logical server (`sql-server-timothy`) | [Old resource group](screenshots/02-lab02-database-vm-removed.png) lists 7 resources and no database VM. [New resource group](screenshots/03-lab03-resource-group.png) lists the SQL server, database, and Key Vault |
 | The database password sits in files people and servers can read | Stored the password as a Key Vault secret named `SqlAdminPassword`, in a vault that uses Azure role-based access control | [Secret](screenshots/05-key-vault-secret.png) shows as Enabled, with the value hidden |
-| The web server needs the password, but giving it a stored credential recreates the problem | Turned on a system-assigned managed identity for `vm-web-01`, so Azure issues it short-lived tokens | [Identity page](screenshots/06-vm-managed-identity-on.png) shows Status On. Test 1 returned a token (length 1894) |
-| The web server should only have the access it needs | Assigned the VM's identity the Key Vault Secrets User role on that one vault | [Role assignment](screenshots/07-vm-key-vault-secrets-user-role.png). Test 2 (read) returned 200. Test 3 (write) returned 403 |
+| The web server needs the password, but giving it a stored credential recreates the problem | Turned on a system-assigned managed identity for `vm-web-01`, so Azure issues it short-lived tokens | [Identity page](screenshots/06-vm-managed-identity-on.png) shows Status On. Test 1 returned a token (length 1894), shown in the video |
+| The web server should only have the access it needs | Assigned the VM's identity the Key Vault Secrets User role on that one vault | [Role assignment](screenshots/07-vm-key-vault-secrets-user-role.png). [Test 2](screenshots/09-test2-read-secret-200.png) (read) returned 200. [Test 3](screenshots/10-test3-write-blocked-403.png) (write) returned 403 |
+| The web server has to be able to reach the new database | Checked the network path from `vm-web-01` to the SQL server on port 1433 | [Test 4](screenshots/11-test4-sql-port-1433-reachable.png) returned "Port 1433 reachable" |
 
 ## Architecture
 
-**Starting point.** The earlier lab ran the application on two servers in separate subnets: an app server and a database server.
+The database server from the earlier lab is gone. The database is now a managed service, and the web server uses its own identity to read the password from Key Vault.
+
+![Architecture of this lab: vm-web-01 gets a token from Microsoft Entra ID, reads the SqlAdminPassword secret from Key Vault with a read-only role, and reaches the sqldb-app database on port 1433](diagrams/architecture.png)
+
+**Where it started.** The earlier lab ran the application on two servers in separate subnets: an app server and a database server.
 
 ![Diagram of the earlier lab: an app server and a database server in separate subnets of one virtual network](screenshots/01-lab02-starting-diagram.png)
-
-**After this lab.** The database server is gone. The database is a managed service, and the web server uses its identity to read the password from Key Vault.
-
-```mermaid
-flowchart LR
-    subgraph RG2["rg-lab02-Timothy - East US"]
-        VM["vm-web-01<br/>Ubuntu 24.04 web server<br/>system-assigned managed identity"]
-    end
-    subgraph RG3["rg-lab03-Timothy - Central US"]
-        KV["kv-lab03-timothy<br/>Key Vault secret: SqlAdminPassword"]
-        DB[("sqldb-app<br/>Azure SQL Database<br/>on sql-server-timothy")]
-    end
-    ENTRA["Microsoft Entra ID"]
-    VM -->|"1. gets a token for its identity"| ENTRA
-    VM -->|"2. reads the secret - read-only role"| KV
-    VM -.->|"3. database login - not yet tested"| DB
-```
 
 | Resource | Name | Region |
 |---|---|---|
@@ -110,13 +98,17 @@ The VM's only role assignment is Key Vault Secrets User, and it applies to this 
 
 ### 7. Test it from the web server
 
-I connected to `vm-web-01` over SSH and ran three tests. The token and secret requests follow [Microsoft's managed identity tutorial for Linux VMs](https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/tutorial-linux-managed-identities-vm-access), adjusted so the token and the password are never printed to the screen.
+I connected to `vm-web-01` over SSH and ran four tests. The token and secret requests follow [Microsoft's managed identity tutorial for Linux VMs](https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/tutorial-linux-managed-identities-vm-access), adjusted so the token and the password are never printed to the screen.
 
 **Test 1: Does the VM have a working identity?** The VM asks Azure's built-in metadata service for a token and prints only the token's length.
 
 ```bash
 TOKEN=$(curl -s 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net' -H Metadata:true | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4); echo "Token length: ${#TOKEN}"
 ```
+
+![Terminal on vm-web-01 showing the Test 1 token command](screenshots/08-test1-identity-token-command.png)
+
+This screenshot shows the command. The result, `Token length: 1894`, is on screen in the [video walkthrough at 3:35](https://www.loom.com/share/b808c626ccc44ec2b4497085ea4515ab?t=215). A length of 0 would have meant the identity was off.
 
 **Test 2: Can the VM read the secret?** The VM requests the secret with that token and prints only the status code.
 
@@ -125,19 +117,37 @@ read -p "Key Vault name: " VAULT
 curl -s -o /dev/null -w "%{http_code}\n" "https://$VAULT.vault.azure.net/secrets/SqlAdminPassword?api-version=2016-10-01" -H "Authorization: Bearer $TOKEN"
 ```
 
+![Terminal on vm-web-01 showing the secret read request returning 200](screenshots/09-test2-read-secret-200.png)
+
+The request returned 200, which means success. The VM read the secret using only its identity.
+
 **Test 3: Is the VM blocked from writing?** The VM tries to create a new secret.
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" -X PUT "https://$VAULT.vault.azure.net/secrets/TestWrite?api-version=2016-10-01" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"value":"test"}'
 ```
 
-![Terminal on vm-web-01 showing Token length 1894, then 200 for the read test and 403 for the write test](screenshots/08-identity-tests-terminal.png)
+![Terminal on vm-web-01 showing the secret write request returning 403](screenshots/10-test3-write-blocked-403.png)
+
+The request returned 403, which means denied. The VM can read secrets but cannot create them.
+
+**Test 4: Can the VM reach the database?** The VM tries to open a connection to the SQL server on port 1433, the port SQL Server listens on.
+
+```bash
+read -p "SQL server name: " SQLSERVER
+timeout 5 bash -c "</dev/tcp/$SQLSERVER.database.windows.net/1433" && echo "Port 1433 reachable" || echo "Port 1433 not reachable"
+```
+
+![Terminal on vm-web-01 showing Port 1433 reachable for sql-server-timothy](screenshots/11-test4-sql-port-1433-reachable.png)
+
+The port is reachable, so the network path from the web server to the database is open. This test does not log in to the database.
 
 | Test | Result | What it means |
 |---|---|---|
 | 1. Get a token | Token length: 1894 | Azure issued the VM a token, so the managed identity works |
 | 2. Read `SqlAdminPassword` | 200 | Success. The VM read the secret using only its identity |
 | 3. Create a new secret | 403 | Denied. The VM is read-only, which is what the role is supposed to allow |
+| 4. Reach the SQL server on port 1433 | Port 1433 reachable | The network path to the database is open. A database login was not tested |
 
 No password was typed or stored on the web server for any of these tests.
 
@@ -166,7 +176,6 @@ Problems I ran into and how I fixed them.
 
 ## Next Steps
 
-- Check from the web server that it can reach the database on port 1433
 - Have the web server log in to the database using the password it reads from Key Vault, which would prove the full chain end to end
 - Add an alert on the database's usage metric
 - Rebuild the lab with Terraform
@@ -178,7 +187,7 @@ Problems I ran into and how I fixed them.
 - Azure RBAC: assigning roles to a user and to a managed identity at the scope of one resource
 - Managed identities: enabling a system-assigned identity on a Linux VM
 - Least privilege: verifying both the allowed and the denied action
-- Linux and SSH: connecting with key-based authentication and running tests with `curl`
+- Linux and SSH: connecting with key-based authentication and running tests with `curl` and a port check
 - Reading HTTP status codes (200, 403) to confirm access results
 
 ## Cleanup
